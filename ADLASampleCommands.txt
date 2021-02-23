@@ -1,0 +1,397 @@
+1) ##DATABASE AND TABLE MANAGEMENT IN DEFAULT
+CREATE DATABASE IF NOT EXISTS CREATEDDATABASE;
+USE DATABASE CREATEDDATABASE; 
+
+DROP TABLE IF EXISTS dbo.freresmonthlychampagnecsv;
+CREATE TABLE dbo.freresmonthlychampagnecsv (
+    INDEX idx1 //Name of index
+    CLUSTERED (Month) //Column to cluster by
+    DISTRIBUTED BY HASH (Month) //Column to partition by
+) AS  
+    EXTRACT Month string, 
+	        Sales float
+    FROM "/data/freresmonthlychampagne.csv"
+    USING Extractors.Csv(skipFirstNRows:1, silent:true);
+
+@data = 
+    EXTRACT Month string,
+            Sales float
+    FROM "data/freresmonthlychampagne.csv"
+    USING Extractors.Csv(skipFirstNRows:1, silent:true);
+
+// Create table based on extraction and populate table
+DROP TABLE IF EXISTS dbo.freresmonthlychampagnecsv1;
+CREATE TABLE dbo.freresmonthlychampagnecsv1 (
+    INDEX idx2 //Name of index
+    CLUSTERED (Month) //Column to cluster by
+    DISTRIBUTED BY HASH (Month) //Column to partition by
+)  AS SELECT * FROM @data; 
+
+
+// Create table and insert into table
+DROP TABLE IF EXISTS dbo.freresmonthlychampagnecsv2;
+CREATE TABLE dbo.freresmonthlychampagnecsv2 (
+    Month string,
+    Sales float,
+    INDEX idx3 //Name of index
+    CLUSTERED (Month) //Column to cluster by
+    DISTRIBUTED BY HASH (Month) //Column to partition by
+) ;
+
+//Insert it into a previously created table
+INSERT INTO dbo.freresmonthlychampagnecsv2
+SELECT *
+FROM @data;
+
+
+
+
+2) READ FROM DEFAULT ADLA STORAGE - ADLS 1.0
+@searchLog =  
+    EXTRACT UserId          int  
+          , Start           DateTime  
+          , Region          string  
+          , Query           string  
+          , Duration        int  
+          , Urls            string  
+          , ClickedUrls     string
+    FROM "/Samples/Outputs/ExampleA.csv",
+         "/Samples/Outputs/ExampleB.csv"
+    USING Extractors.Csv();
+
+// The file created below will be used in a later example; otherwise, the OUTPUT statement is not necessarily needed.
+OUTPUT @searchLog
+TO "/Samples/Outputs/ExampleC.csv" 
+USING Outputters.Csv();
+
+
+
+
+3) ##READ FROM ADLS 1.0
+@searchLog =  
+    EXTRACT UserId          int  
+          , Start           DateTime  
+          , Region          string  
+          , Query           string  
+          , Duration        int  
+          , Urls            string  
+          , ClickedUrls     string  
+    FROM "adl://<adl_accountname>.azuredatalakestore.net/Samples/Data/SearchLog.tsv"
+    USING Extractors.Tsv();
+
+OUTPUT @searchLog
+TO "/Samples/Outputs/ExampleB.csv" 
+USING Outputters.Csv();
+
+
+
+
+
+4) ##READ FROM BLOB STORAGE
+@orders =  
+    EXTRACT orderid	 int,
+            ordernumber	 string,
+            customerid	 int,
+            orderdate	 string,
+            totalamount  int?
+    FROM "wasb://datasrc@azuremonitorstorageacct/Orders.csv"
+    USING Extractors.Csv(skipFirstNRows:1, silent:true);
+
+OUTPUT @orders
+TO "/output/wasborders.csv" 
+USING Outputters.Csv();
+
+
+
+
+
+5) ##READ MULTIPLE FILES FROM BLOB STORAGE
+@orders =  
+    EXTRACT orderid	 int,
+            ordernumber	 string,
+            customerid	 int,
+            orderdate	 string,
+            totalamount  int?
+    FROM "wasb://datasrc@azuremonitorstorageacct/Orders{*}.csv"
+    USING Extractors.Csv(skipFirstNRows:1, silent:true);
+
+OUTPUT @orders
+TO "/output/wasborders.csv" 
+USING Outputters.Csv();
+
+
+
+
+
+
+6) ##READ DATA FROM DATABASE TABLE 
+@result = 
+    SELECT *
+    FROM CREATEDDATABASE.dbo.freresmonthlychampagnecsv;
+
+OUTPUT @result
+TO "wasb://datasrc@azuremonitorstorageacct/champagnesales.tsv" 
+USING Outputters.Tsv();
+
+OUTPUT @result
+TO "/output/monthlychampagnesales.csv"
+USING Outputters.Csv();
+
+OUTPUT @result
+TO "/output/monthlychampagnesales.csv"
+USING Outputters.Csv();
+
+
+
+7) #CASE STMT
+@result =
+    SELECT  EmpID,
+            EmpName,
+            (DeptID == 100) ? "Engineering" : 
+                (DeptID == 200) ? "HR" :
+                (DeptID == 300) ? "Executive" :
+                (DeptID == 400) ? "Marketing" :
+                (DeptID == 500) ? "Sales" : "I did not anticipate this" AS Department,
+            Salary,
+            StartDate
+    FROM @employees;
+
+
+#HANDLING NULL NULLIF (Transact-SQL) and ?:
+@result =
+    SELECT  
+            SalesOrderID, CustomerID, SaleAmount,
+
+            // comparing to static value; returns null when SaleAmount equals 0, else SaleAmount
+            (SaleAmount == 0 ? (int?)null : SaleAmount) AS SaleAmount2,
+
+            // comparing to another column, returns null when SaleAmount equals DisputedAmount, else SaleAmount
+            (SaleAmount == DisputedAmount ? (int?)null : SaleAmount) AS SaleAmount3  
+    FROM @dailySales;
+
+
+
+ISNULL (Transact-SQL) and ??
+// U-SQL, Using ?? Operator
+@result =
+    SELECT  EmpID, EmpName, Salary,
+            Salary ?? 0 AS Salary2,
+            EmpName ?? "Unknown" AS EmpName2,
+
+            // Alternatives
+            (Equals(Salary, null)) ? 1 : Salary AS Salary3,
+            (Salary == (int?)null) ? 2 : Salary AS Salary4,
+
+            // String Alternatives
+            string.IsNullOrEmpty(EmpName) ? "Still Unknown" : EmpName AS EmpName3,
+            string.IsNullOrWhiteSpace(EmpName) ? "Really Unknown" : EmpName AS EmpName4
+    FROM @employees;
+
+
+
+#TOP ROWS
+// U-SQL, Using FETCH
+OUTPUT @employees
+TO "/Output/ReferenceGuide/CommonSQLExpressions/Top1.csv"
+ORDER BY EmpID FETCH 5 ROWS
+USING Outputters.Csv(outputHeader: true);
+
+
+// U-SQL, Using SAMPLE
+@result =
+    SELECT EmpID, EmpName
+    FROM @employees
+    SAMPLE ANY(5);
+
+OUTPUT @result
+TO "/Output/ReferenceGuide/CommonSQLExpressions/Top2.csv"
+USING Outputters.Csv(outputHeader: true);
+
+
+// U-SQL, Using ROW_NUMBER
+@result =
+    SELECT ROW_NUMBER() OVER (ORDER BY Salary DESC) AS row,
+           *
+    FROM @employees;
+
+@result =
+    SELECT *
+    FROM @result
+    WHERE row <= 5;
+
+
+#Subqueries
+// U-SQL; Using SEMIJOIN 
+@result =
+    SELECT *
+    FROM @employees AS e
+    LEFT SEMIJOIN (SELECT DeptID FROM @departments WHERE DeptName IN ("Engineering", "Executive")) AS sc
+    ON e.DeptID == sc.DeptID;
+
+OUTPUT @result
+TO "/Output/ReferenceGuide/Joins/SemiJoins/SubqueryIN.txt"
+USING Outputters.Tsv(outputHeader: true);
+
+/* T-SQL; Using a subquery with NOT IN
+SELECT * 
+FROM @employees
+WHERE DeptID NOT IN 
+	(SELECT DeptID FROM @departments WHERE DeptName IN ('Engineering', 'Executive'));
+*/
+
+// U-SQL; Using ANTISEMIJOIN 
+@result =
+    SELECT *
+    FROM @employees AS e
+    LEFT ANTISEMIJOIN (SELECT DeptID FROM @departments WHERE DeptName IN ("Engineering", "Executive")) AS sc
+    ON e.DeptID == sc.DeptID;
+
+OUTPUT @result
+TO "/Output/ReferenceGuide/Joins/AntiSemiJoins/SubqueryNOTIN.txt"
+USING Outputters.Tsv(outputHeader: true);
+
+
+
+@searchlog =
+     EXTRACT UserId          int,
+             Start           DateTime,
+             Region          string,
+             Query           string,
+             Duration        int?,
+             Urls            string,
+             ClickedUrls     string
+     FROM "/Samples/Data/SearchLog.tsv"
+     USING Extractors.Text(delimiter: '\t', skipFirstNRows: 1);
+
+OUTPUT @searchlog 
+TO "/Output/ReferenceGuide/BuiltIn/UDOs/extractorText_SearchLog.csv" 
+USING Outputters.Csv();
+
+@Drivers =
+    EXTRACT driver_id   int,
+        name            string,
+        street          string,
+        city            string,
+        region          string,
+        zipcode         string,
+        country         string,
+        phone_numbers   string // Map
+ FROM "/Samples/Data/AmbulanceData/Drivers.txt"
+ USING Extractors.Text(delimiter: '\t', encoding:Encoding.Unicode);
+
+OUTPUT @Drivers 
+TO "/Output/ReferenceGuide/BuiltIn/UDOs/extractorText_Drivers.csv" 
+USING Outputters.Csv();
+
+// You need to quote ASCII with [] to make sure it is not read as a reserved U-SQL keyword
+@Trips =
+    EXTRACT date    DateTime,
+        driver_id   int,
+        vehicle_id  int,
+        trips       string // Array
+     FROM "/Samples/Data/AmbulanceData/DriverShiftTrips.csv"
+     USING Extractors.Text(encoding: Encoding.[ASCII]);
+
+OUTPUT @Trips 
+TO "/Output/ReferenceGuide/BuiltIn/UDOs/extractorText_DriverShiftTrips.csv" 
+USING Outputters.Csv();
+
+
+  // Excel CSV (ANSI with ASCII only)
+  // You need to quote ASCII with [] to make sure it is not read as a reserved U-SQL keyword
+  @Trips =
+      EXTRACT date    DateTime,
+          driver_id   int,
+          vehicle_id  int,
+          trips       string // Array
+       FROM "/Samples/Data/AmbulanceData/DriverShiftTrips.csv"
+       USING Extractors.Csv(encoding: Encoding.[ASCII]);
+
+  OUTPUT @Trips 
+  TO "/Output/ReferenceGuide/BuiltIn/UDOs/extractorCsv_DriverShiftTrips.csv" 
+  USING Outputters.Csv();
+
+
+
+
+#EXTRACTOR PARAMETERS
+Parameter name		Parameter type			Default values
+---------------		--------------------		---------------------------------------
+rowDelimiter		string (max length=1)		"\r\n" (carriage return, linefeed)
+							"\r" (carriage return)
+							"\n" (linefeed)
+skipFirstNRows		Int				0
+
+#OUTPUTTER PARAMETERS
+Parameter name		Parameter type		Default value
+----------------	---------------------	---------------------------
+delimiter		char			','
+dateTimeFormat		string			"O"
+escapeCharacter		char?			null
+outputHeader		bool			false
+rowDelimiter		string (max length=1)	"\r\n" (carriage return, linefeed)
+						"\r" (carriage return)
+						"\n" (linefeed)
+
+
+
+#OUTPUTTERS SAMPLES
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text.txt" USING Outputters.Text();
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_outputHeader.txt" USING Outputters.Text(outputHeader: true);
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_charFormat.txt" USING Outputters.Text(charFormat: "string");
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_delimiter.txt" USING Outputters.Text(delimiter: '|');
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_dateTimeFormat.txt" USING Outputters.Text(dateTimeFormat: "D");
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_encoding.txt" USING Outputters.Text(encoding: Encoding.UTF32);
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_escapeCharacter.txt" USING Outputters.Text(escapeCharacter: ':');
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_nullEscape.txt" USING Outputters.Text(nullEscape: "null");
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_quoting.txt" USING Outputters.Text(quoting: false);
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_rowDelimiter.txt" USING Outputters.Text(rowDelimiter: "\u0003");
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_charFormat_nullEscape_escapeCharacter.txt" USING Outputters.Text(charFormat: "string", nullEscape:"NULL", escapeCharacter:'#');
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Text_charFormat_encoding.txt" USING Outputters.Text(charFormat: "string", encoding:Encoding.Unicode);
+
+
+
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv.csv" USING Outputters.Csv();
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_outputHeader.csv" USING Outputters.Csv(outputHeader: true);
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_charFormat.csv" USING Outputters.Csv(charFormat: "string");
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_dateTimeFormat.csv" USING Outputters.Csv(dateTimeFormat: "D");
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_encoding.csv" USING Outputters.Csv(encoding: Encoding.UTF32);
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_escapeCharacter.csv" USING Outputters.Csv(escapeCharacter: ':');
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_nullEscape.csv" USING Outputters.Csv(nullEscape: "null");
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_quoting.csv" USING Outputters.Csv(quoting: false);
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_rowDelimiter.csv" USING Outputters.Csv(rowDelimiter: "\u0003");
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_charFormat_nullEscape_escapeCharacter.csv" USING Outputters.Csv(charFormat: "string", nullEscape:"NULL", escapeCharacter:'#');
+OUTPUT @sampleData TO "/Output/ReferenceGuide/BuiltIn/UDOs/Csv_charFormat_encoding.csv" USING Outputters.Csv(charFormat: "string", encoding:Encoding.Unicode);
+
+
+
+#FUNCTIONS
+@result =
+    SELECT EmpName,
+           AVG(Salary) OVER() AS AverageSalaryAllDepts  #MAX MIN SUM etc
+    FROM @employees;
+
+@result =
+    SELECT COUNT( * ) AS TotalRecordCount,
+           COUNT(DeptName) AS DeptNameCount,
+           COUNT(DISTINCT DeptName) AS DistinctDeptNameCount
+    FROM master.dbo.Employees;
+
+## Array Aggregate
+@b = 
+    SELECT 
+        Region,
+        ARRAY_AGG<string>(Code) AS CodesArray
+    FROM @a
+    GROUP BY Region;
+
+@c =
+    SELECT 
+        Region,
+        string.Join(";", CodesArray) AS CodesString
+    FROM @b;
+
+OUTPUT @c 
+    TO @"/Samples/Output/ARRAY_AGG_output.tsv"
+    USING Outputters.Tsv();
+
